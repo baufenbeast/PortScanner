@@ -1,0 +1,112 @@
+# Program by Tom Zaczkiewicz
+# Base code from https://www.pythonforbeginners.com/code-snippets-source-code/port-scanner-in-python
+
+import socket
+import sys
+import threading
+import concurrent.futures
+from datetime import datetime
+
+run = True
+
+# Set timeout to prevent spending too long on closed ports
+#socket.setdefaulttimeout(0.5)
+
+
+class ScanResults:
+    def __init__(self):
+        self.count = 0
+        self.portlist = list()
+        self._lock = threading.Lock()
+
+    def scan_port(self, port, remoteServerIP):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # if port != 80:
+        #    sock.settimeout(.1)
+        result = sock.connect_ex((remoteServerIP, port))
+        # with self._lock:
+        #     print("Port {}, {}".format(port, result))
+        if result == 0:
+            # lock thread and add open port to list. Lock is released automatically at the end of the with block.
+            with self._lock:
+                self.portlist.append(port)
+        sock.close()
+
+
+t1 = datetime.now()
+filetime = t1.year.__str__() + t1.month.__str__() + t1.day.__str__() + t1.hour.__str__() + t1.minute.__str__()
+# Open file for writing, filename is portoutput+current date/time down to the minute
+f = open("portoutput" + filetime + ".txt", 'w')
+# Run loop
+while run:
+
+    # Try scanning for ports
+    try:
+        # Ask for input
+        remoteServer = input("Enter a host to scan: ")
+        remoteServerIP = socket.gethostbyname(remoteServer)
+
+        # Check what time the scan started
+        t1 = datetime.now()
+        print("Scan started at: {}\n".format(t1))
+        f.write("Scan started at: {}\n\n".format(t1))
+
+        print("Open ports for " + remoteServer + ":")
+        f.write("Open ports for " + remoteServer + ":\n")
+        scan = ScanResults()
+        # max_workers allows 103 concurrent threads, allowing the program to finish in 10 "batches".
+        # I can't set max_workers too high, because large sites like google.com shut you out (probably a DoS defense)
+        # if you scan too many ports in too short a time, resulting in ports that should be open returning as closed.
+        # A similar behavior happens with settimeout(), but it seems to kick in even sooner.
+        # 103 allows the program to complete in a reasonable amount of time, without scaring the target website.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=103) as executor:
+            # Scan for 1-1025
+            for port in range(1, 1025):
+                executor.submit(scan.scan_port, port, remoteServerIP)
+        # At the end of this with block, the main thread waits for all threads created by the executor to finish.
+
+        # Threading makes the port list out of order, so sort list and print/write to file
+        scan.portlist.sort()
+        for open_port in scan.portlist:
+            print("Port {} is open".format(open_port))
+            f.write("Port {} is open\n".format(open_port))
+
+    except socket.gaierror:
+        print("Hostname could not be resolved.")
+        f.write("Hostname could not be resolved.\n")
+        f.close()
+        sys.exit()
+
+    except KeyboardInterrupt:
+        print("You pressed Ctrl+C")
+        f.write("You pressed Ctrl+C\n")
+        f.close()
+        sys.exit()
+
+    except socket.error:
+        print("Couldn't connect to server")
+        f.write("Couldn't connect to server\n")
+        f.close()
+        sys.exit()
+
+    # Checking the time again
+    t2 = datetime.now()
+    print("\nScan finished at: {}".format(t2))
+    f.write("\nScan finished at: {}\n".format(t2))
+
+    # Calculates the difference of time, to see how long it took to run the script
+    total = t2 - t1
+
+    # Print information to screen
+    print("Total scan duration was: {}\n".format(total))
+    f.write("Total scan duration was: {}\n\n".format(total))
+
+    # if input is 'y', run=True and the loop restarts
+    run = (input("Scan another host (y/n)? ") == 'y')
+    if run:
+        print("\n==========================================\n")
+        f.write("==========================================\n\n")
+
+# End While loop
+# Close file at the end of execution
+f.close()
